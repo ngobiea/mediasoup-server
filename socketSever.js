@@ -29,7 +29,7 @@ const registerSocketServer = async (server, worker) => {
   });
 
   io.on('connection', (socket) => {
-    socket.on('createSession', (callback) => {
+    socket.on('createSession', async (callback) => {
       const rtpCapabilities = router.rtpCapabilities;
       callback({ rtpCapabilities });
     });

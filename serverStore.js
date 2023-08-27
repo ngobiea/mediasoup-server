@@ -84,7 +84,7 @@ const handleConsume = async ({ rtpCapabilities }, callback, router) => {
   }
 };
 
-const handleConsumeResume = async (callback) => {
+const handleConsumeResume = async () => {
   console.log('consumer resume');
   await consumer.resume();
 };

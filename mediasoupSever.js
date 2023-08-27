@@ -6,7 +6,6 @@ const createWebRtcTransport = async (callback, router) => {
         {
           // replace with relevant IP address
           ip: '192.168.18.64',
-
           // announcedIp: ' 192.168.18.64',
         },
       ],
