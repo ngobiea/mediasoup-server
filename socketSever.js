@@ -8,13 +8,13 @@ import {
   handleTransportProduce,
   handleTransportReceiveConnect,
   handleConsume,
-  handleConsumeResume
+  handleConsumeResume,
+  handleJoinSession,
+  handleGetProducers,
+  handleDisconnect,
 } from './serverStore';
-import { mediaCodecs } from './mediasoupSever';
 
 const registerSocketServer = async (server, worker) => {
-  const router = await worker.createRouter({ mediaCodecs });
-
   const io = new Server(server, {
     cors: {
       origin: '*',
@@ -29,23 +29,50 @@ const registerSocketServer = async (server, worker) => {
   });
 
   io.on('connection', (socket) => {
-    socket.on('createSession', async (callback) => {
-      const rtpCapabilities = router.rtpCapabilities;
-      callback({ rtpCapabilities });
+    socket.on('disconnect', () => {
+      handleDisconnect(socket.userId);
+    });
+    socket.on('createSession', async ({ sessionId }, callback) => {
+      handleJoinSession({ sessionId }, callback, socket, worker);
     });
 
-    socket.on('createWebRtcTransport', async ({ sender }, callback) => {
-      handleCreateTransport({ sender }, callback, router);
+    socket.on('createWebRtcTransport', async ({ consumer }, callback) => {
+      handleCreateTransport({ consumer }, callback, socket.userId);
     });
-    socket.on('transport-connect', handleTransportConnect);
 
-    socket.on('transport-produce', handleTransportProduce);
+    socket.on('transport-connect', ({ dtlsParameters }) => {
+      handleTransportConnect({ dtlsParameters }, socket.userId);
+    });
+
+    socket.on(
+      'transport-produce',
+      ({ kind, rtpParameters, appData }, callback) => {
+        handleTransportProduce(
+          { kind, rtpParameters, appData },
+          callback,
+          socket.userId
+        );
+      }
+    );
+    socket.on('getProducers', (callback) => {
+      handleGetProducers(callback, socket.userId);
+    });
     socket.on('transport-recv-connect', handleTransportReceiveConnect);
-    socket.on('consume', ({ rtpCapabilities }, callback) => {
-      handleConsume({ rtpCapabilities }, callback, router);
-    });
+    socket.on(
+      'consume',
+      (
+        { rtpCapabilities, remoteProducerId, serverConsumerTransportId },
+        callback
+      ) => {
+        handleConsume(
+          { rtpCapabilities, remoteProducerId, serverConsumerTransportId },
+          callback,
+          socket
+        );
+      }
+    );
 
-    socket.on('consumer-resume',handleConsumeResume)
+    socket.on('consumer-resume', handleConsumeResume);
   });
 };
 

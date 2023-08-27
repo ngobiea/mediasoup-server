@@ -1,4 +1,4 @@
-const createWebRtcTransport = async (callback, router) => {
+const createWebRtcTransport = async (router) => {
   try {
     // https://mediasoup.org/documentation/v3/mediasoup/api/#WebRtcTransportOptions
     const webRtcTransportOptions = {
@@ -29,24 +29,10 @@ const createWebRtcTransport = async (callback, router) => {
     transport.on('close', () => {
       console.log('transport closed');
     });
-    callback({
-      // https://mediasoup.org/documentation/v3/mediasoup-client/api/#TransportOptions
-      serverParams: {
-        id: transport.id,
-        iceParameters: transport.iceParameters,
-        iceCandidates: transport.iceCandidates,
-        dtlsParameters: transport.dtlsParameters,
-      },
-    });
     return transport;
   } catch (error) {
     console.log(error);
-    callback({
-      serverParams: {
-        error,
-      },
-    });
-    return null;
+    return error;
   }
 };
 
