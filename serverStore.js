@@ -1,11 +1,9 @@
 import { createWebRtcTransport, mediaCodecs } from './mediasoupSever';
 
-let producerTransport;
-let consumerTransport;
 //rooms
-let classSessions = {};
+const classSessions = {};
 //peers
-let participants = {};
+const participants = {};
 let transports = [];
 let producers = [];
 let consumers = [];
@@ -39,7 +37,8 @@ const handleJoinSession = async ({ sessionId }, callback, socket, worker) => {
     socket,
     sessionId,
     transports: [],
-    producer: [],
+    producers: [],
+    consumers: [],
     participantDetails: {
       name: '',
       isTutor: false,
@@ -49,8 +48,26 @@ const handleJoinSession = async ({ sessionId }, callback, socket, worker) => {
   callback({ rtpCapabilities });
 };
 
+const createSession = async (sessionId, userId, worker) => {
+  let router;
+  let peers = [];
+  if (classSessions[sessionId]) {
+    router = classSessions[sessionId].router;
+    peers = classSessions[sessionId].peers || [];
+  } else {
+    router = await worker.createRouter({ mediaCodecs });
+  }
+  console.log(`Router ID: ${router.id}`, peers.length);
+
+  classSessions[sessionId] = {
+    router,
+    peers: [...peers, userId],
+  };
+  return router;
+};
+
 const handleCreateTransport = async ({ consumer }, callback, userId) => {
-  console.log(`Is this a sender request? ${sender}`);
+  console.log(`Is this a sender request? ${consumer}`);
 
   const sessionId = participants[userId].sessionId;
 
@@ -94,13 +111,17 @@ const addTransport = (transport, sessionId, consumer, userId) => {
     transports: [...participants[userId].transports, transport.id],
   };
 };
+
 const handleGetProducers = (callback, userId) => {
   const { sessionId } = participants[userId];
 
   let producerList = [];
   producers.forEach((producerData) => {
-    if (producerData.userId !== userId && producerData.sessionId === roomName) {
-      producerList = [...producerList, producerData.produce.id];
+    if (
+      producerData.userId !== userId &&
+      producerData.sessionId === sessionId
+    ) {
+      producerList = [...producerList, producerData.producer.id];
     }
   });
 
@@ -108,12 +129,29 @@ const handleGetProducers = (callback, userId) => {
 };
 
 const addProducer = (producer, sessionId, userId) => {
+  // console.log(userId)
+  // console.log(participants[userId])
   producers = [...producers, { userId, producer, sessionId }];
   participants[userId] = {
     ...participants[userId],
     producers: [...participants[userId].producers, producer.id],
   };
 };
+
+const informConsumers = (sessionId, userId, id) => {
+  console.log(`just joined, id ${id} ${sessionId}, ${userId}`);
+
+  producers.forEach((producerData) => {
+    if (
+      producerData.userId !== userId &&
+      producerData.sessionId === sessionId
+    ) {
+      const produceSocket = participants[producerData.userId].socket;
+      produceSocket.emit('new-producer', { producerId: id });
+    }
+  });
+};
+
 const addConsumer = (consumer, sessionId, userId) => {
   consumers = [...consumers, { userId, consumer, sessionId }];
 
@@ -123,44 +161,31 @@ const addConsumer = (consumer, sessionId, userId) => {
   };
 };
 
-const informConsumers = (sessionId, userId, id) => {
-  console.log(`just joined, id ${id} ${roomName}, ${socketId}`);
-
-  producers.forEach((producerData) => {
-    if (
-      producerData.userId !== userId &&
-      producerData.sessionId === sessionId
-    ) {
-      const produceSocket = peers[producerData.userId].socket;
-      produceSocket.emit('new-producer', { producerId: id });
-    }
-  });
-};
-
 const getTransport = (userId) => {
-  const [producerTransport] = transports.filter((transport) => {
-    return transport.userId === userId && !transport.consumer;
-  });
+  const [producerTransport] = transports.filter(
+    (transport) => transport.userId === userId && !transport.consumer
+  );
   return producerTransport.transport;
 };
 
 const handleTransportConnect = async ({ dtlsParameters }, userId) => {
-  console.log('DTLS PARAMS... ', { dtlsParameters });
+  console.log('DTLS PARAMS... ', dtlsParameters);
   await getTransport(userId).connect({ dtlsParameters });
 };
 
 const handleTransportProduce = async (
-  { kind, rtpParameters, appData },
+  { kind, rtpParameters },
   callback,
   userId
 ) => {
-  const producer = await producerTransport.produce({
+  console.log(userId);
+  const producer = await getTransport(userId).produce({
     kind,
     rtpParameters,
   });
-  const { sessionId } = peers[userId];
+  const { sessionId } = participants[userId];
 
-  addProducer(producer, sessionId);
+  addProducer(producer, sessionId, userId);
   informConsumers(sessionId, userId, producer.id);
 
   console.log('Producer ID: ', producer.id, producer.kind);
@@ -172,7 +197,7 @@ const handleTransportProduce = async (
 
   callback({
     id: producer.id,
-    producersExist: producers.length > 1 ? true : false,
+    producersExist: producers.length > 1,
   });
 };
 
@@ -184,7 +209,7 @@ const handleTransportReceiveConnect = async ({
   const consumerTransport = transports.find(
     (transportData) =>
       transportData.consumer &&
-      transportData.transport.id === serverConsumerTransportId
+      transportData.transport.id == serverConsumerTransportId
   ).transport;
   await consumerTransport.connect({ dtlsParameters });
 };
@@ -198,10 +223,10 @@ const handleConsume = async (
     const { sessionId } = participants[socket.userId];
     const router = classSessions[sessionId].router;
 
-    let consumerTransport = transports.find(
+    const consumerTransport = transports.find(
       (transportData) =>
         transportData.consumer &&
-        transportData.transport.id === serverConsumerTransportId
+        transportData.transport.id == serverConsumerTransportId
     ).transport;
 
     if (
@@ -212,8 +237,8 @@ const handleConsume = async (
     ) {
       const consumer = await consumerTransport.consume({
         producerId: remoteProducerId,
-        rtpCapabilities,
         paused: true,
+        rtpCapabilities,
       });
 
       console.log(consumer);
@@ -234,7 +259,7 @@ const handleConsume = async (
         );
       });
 
-      addConsumer(consumer, sessionId);
+      addConsumer(consumer, sessionId,socket.userId);
 
       const serverParams = {
         id: consumer.id,
@@ -256,30 +281,12 @@ const handleConsume = async (
   }
 };
 
-const handleConsumeResume = async () => {
+const handleConsumeResume = async ({ serverConsumerId }) => {
   console.log('consumer resume');
   const { consumer } = consumers.find(
     (consumerData) => consumerData.consumer.id === serverConsumerId
   );
   await consumer.resume();
-};
-
-const createSession = async (sessionId, userId, worker) => {
-  let router;
-  let peers = [];
-  if (classSessions[sessionId]) {
-    router = classSessions[sessionId].router;
-    peers = classSessions[sessionId].peers || [];
-  } else {
-    router = await worker.createRouter({ mediaCodecs });
-  }
-  console.log(`Router ID: ${router.id}`, peers.length);
-
-  classSessions[sessionId] = {
-    router,
-    peers: [...peers, userId],
-  };
-  return router;
 };
 
 export {

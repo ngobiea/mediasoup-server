@@ -29,6 +29,7 @@ const registerSocketServer = async (server, worker) => {
   });
 
   io.on('connection', (socket) => {
+    console.log(typeof socket.userId)
     socket.on('disconnect', () => {
       handleDisconnect(socket.userId);
     });
